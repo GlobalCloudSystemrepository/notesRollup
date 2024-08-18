@@ -1,0 +1,109 @@
+public class ContentDocumentLinkTriggerHandler {
+
+    public static void handleAfterInsert(List<ContentDocumentLink> newLinks) {
+        System.debug('Entering handleAfterInsert method');
+        
+        // Collect the ContentDocumentIds with FileType = 'SNOTE'
+        Set<Id> contentDocumentIds = new Set<Id>();
+        for (ContentDocumentLink link : newLinks) {
+            contentDocumentIds.add(link.ContentDocumentId);
+        }
+        System.debug('Collected ContentDocumentIds: ' + contentDocumentIds);
+
+        // Query ContentDocument for the FileType = 'SNOTE'
+        Map<Id, ContentDocument> sNoteDocs = new Map<Id, ContentDocument>(
+            [SELECT Id FROM ContentDocument WHERE Id IN :contentDocumentIds AND FileType = 'SNOTE']
+        );
+        System.debug('Queried ContentDocuments with FileType SNOTE: ' + sNoteDocs);
+
+        // If there are no SNOTE docs, exit early
+        if (sNoteDocs.isEmpty()) {
+            System.debug('No SNOTE ContentDocuments found, exiting.');
+            return;
+        }
+
+        // Prepare for the next step
+        List<ContentDocumentLink> newLinksToCreate = new List<ContentDocumentLink>();
+        Set<Id> linkedEntityIds = new Set<Id>();
+        for (ContentDocumentLink link : newLinks) {
+            if (sNoteDocs.containsKey(link.ContentDocumentId)) {
+                linkedEntityIds.add(link.LinkedEntityId);
+            }
+        }
+        System.debug('Collected LinkedEntityIds: ' + linkedEntityIds);
+
+        // Query Account to get PersonContactId for LinkedEntityIds that are Person Accounts
+        Map<Id, Account> accountMap = new Map<Id, Account>();
+        Set<Id> personContactIds = new Set<Id>();
+        if (!linkedEntityIds.isEmpty()) {
+            List<Account> accountList = [
+                SELECT Id, PersonContactId
+                FROM Account
+                WHERE Id IN :linkedEntityIds
+            ];
+            for (Account acc : accountList) {
+                accountMap.put(acc.Id, acc);
+                if (acc.PersonContactId != null) {
+                    personContactIds.add(acc.PersonContactId);
+                }
+            }
+        }
+        System.debug('Queried Accounts for PersonContactId: ' + accountMap);
+        System.debug('Collected PersonContactIds: ' + personContactIds);
+
+        // Query AccountContactRelation based on the PersonContactId retrieved from Account
+        Map<Id, AccountContactRelation> acrMap = new Map<Id, AccountContactRelation>();
+        if (!personContactIds.isEmpty()) {
+            List<AccountContactRelation> acrList = [
+                SELECT Id, AccountId, ContactId
+                FROM AccountContactRelation
+                WHERE ContactId IN :personContactIds
+                AND FinServ__PrimaryGroup__c = true
+            ];
+            for (AccountContactRelation acr : acrList) {
+                acrMap.put(acr.ContactId, acr);
+            }
+        }
+        System.debug('Queried AccountContactRelation records: ' + acrMap);
+
+        // Create new ContentDocumentLink records
+        for (ContentDocumentLink link : newLinks) {
+            if (sNoteDocs.containsKey(link.ContentDocumentId)) {
+                System.debug('Processing ContentDocumentLink with ID: ' + link.Id);
+                
+                Account account = accountMap.get(link.LinkedEntityId);
+                if (account != null) {
+                    System.debug('Found Account for LinkedEntityId: ' + link.LinkedEntityId);
+                    
+                    AccountContactRelation acr = acrMap.get(account.PersonContactId);
+                    if (acr != null) {
+                        System.debug('Found AccountContactRelation for PersonContactId: ' + account.PersonContactId);
+                        
+                        ContentDocumentLink newLink = new ContentDocumentLink(
+                            ContentDocumentId = link.ContentDocumentId,
+                            LinkedEntityId = acr.AccountId,
+                            ShareType = link.ShareType, // Set this to the appropriate value if needed
+                            Visibility = link.Visibility // Set this to the appropriate value if needed
+                        );
+                        newLinksToCreate.add(newLink);
+                        System.debug('Prepared new ContentDocumentLink record: ' + newLink);
+                    } else {
+                        System.debug('No AccountContactRelation found for PersonContactId: ' + account.PersonContactId);
+                    }
+                } else {
+                    System.debug('No Account found for LinkedEntityId: ' + link.LinkedEntityId);
+                }
+            } else {
+                System.debug('ContentDocument is not an SNOTE, skipping: ' + link.ContentDocumentId);
+            }
+        }
+
+        if (!newLinksToCreate.isEmpty()) {
+            System.debug('Inserting new ContentDocumentLink records: ' + newLinksToCreate);
+            insert newLinksToCreate;
+            System.debug('Insert successful');
+        } else {
+            System.debug('No new ContentDocumentLink records to insert.');
+        }
+    }
+}
