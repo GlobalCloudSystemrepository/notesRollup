@@ -3,4 +3,4 @@ Are you frustrated that Notes on Person Accounts don't roll up to their respecti
 
 You can find the code shared during this video here. I would recommend deploying the APEX trigger to your sandbox first for testing. You can easily use chatGPT for test classes (Or please get in touch with me and I will be happy to provide those for you).
 
-Check out the solution in Salesfroce Financial cloud here: https://youtu.be/u9otrZixmoM
+Check out the solution in Salesforce Financial cloud here: https://youtu.be/u9otrZixmoM
